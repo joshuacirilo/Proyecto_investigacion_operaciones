@@ -2,15 +2,16 @@ import customtkinter as ctk
 from tkinter import messagebox
 import numpy as np
 
-# Apariencia y tema
+# Configuración del tema
 ctk.set_appearance_mode("dark")  # "light" o "dark"
-ctk.set_default_color_theme("blue")  # temas: "blue", "green", "dark-blue"
+ctk.set_default_color_theme("blue")  # "blue", "green", "dark-blue"
 
-class MetodoCostoMinimoApp(ctk.CTk):
+
+class MetodoEsquinaNoroesteApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("🚚 Método de Costo Mínimo - Modelo de Transporte")
+        self.title("🚚 Método de la Esquina Noroeste - Modelo de Transporte")
         self.geometry("1000x750")
         self.minsize(900, 650)
 
@@ -23,13 +24,13 @@ class MetodoCostoMinimoApp(ctk.CTk):
 
         self._build_ui()
 
-    # ================================
+    # =======================
     # INTERFAZ PRINCIPAL
-    # ================================
+    # =======================
     def _build_ui(self):
         title = ctk.CTkLabel(
             self,
-            text="Método de Costo Mínimo",
+            text="Método de la Esquina Noroeste",
             font=ctk.CTkFont(size=24, weight="bold"),
         )
         title.pack(pady=(20, 10))
@@ -55,7 +56,7 @@ class MetodoCostoMinimoApp(ctk.CTk):
         )
         btn_configurar.grid(row=0, column=4, padx=20, pady=10)
 
-        # Contenedor de matriz
+        # Frame matriz
         self.matriz_frame = ctk.CTkScrollableFrame(
             self, label_text="Matriz de Costos", corner_radius=15
         )
@@ -81,9 +82,9 @@ class MetodoCostoMinimoApp(ctk.CTk):
         )
         self.resultados_frame.pack(padx=20, pady=10, fill="both", expand=True)
 
-    # ================================
+    # =======================
     # MATRIZ DE COSTOS
-    # ================================
+    # =======================
     def configurar_matriz(self):
         for widget in self.matriz_frame.winfo_children():
             widget.destroy()
@@ -132,7 +133,7 @@ class MetodoCostoMinimoApp(ctk.CTk):
             e_demanda.bind("<KeyRelease>", lambda e: self.actualizar_totales())
             self.entradas_demandas.append(e_demanda)
 
-        # Cuadro verde (totales)
+        # Cuadro verde
         self.total_label = ctk.CTkLabel(
             self.matriz_frame,
             text="0 / 0",
@@ -154,9 +155,9 @@ class MetodoCostoMinimoApp(ctk.CTk):
         except ValueError:
             self.total_label.configure(text="Error", text_color="red")
 
-    # ================================
+    # =======================
     # LÓGICA DEL MÉTODO
-    # ================================
+    # =======================
     def obtener_datos(self):
         try:
             self.costos = [[float(e.get()) for e in fila] for fila in self.entradas_costos]
@@ -177,30 +178,35 @@ class MetodoCostoMinimoApp(ctk.CTk):
         if abs(total_oferta - total_demanda) > 1e-6:
             messagebox.showwarning("Advertencia", "El problema no está balanceado.")
 
-        asignaciones = self.metodo_costo_minimo()
+        asignaciones = self.metodo_esquina_noroeste()
         self.mostrar_resultados(asignaciones)
 
-    def metodo_costo_minimo(self):
+    def metodo_esquina_noroeste(self):
+        """Implementación del método de la esquina noroeste."""
         asignaciones = np.zeros((self.num_origenes, self.num_destinos))
-        ofertas_restantes = self.ofertas.copy()
-        demandas_restantes = self.demandas.copy()
+        ofertas_rest = self.ofertas.copy()
+        demandas_rest = self.demandas.copy()
 
-        # Crear lista de celdas con sus costos
-        celdas = [(i, j, self.costos[i][j]) for i in range(self.num_origenes) for j in range(self.num_destinos)]
-        celdas.sort(key=lambda x: x[2])  # Ordenar por menor costo
+        i, j = 0, 0
+        while i < self.num_origenes and j < self.num_destinos:
+            cantidad = min(ofertas_rest[i], demandas_rest[j])
+            asignaciones[i][j] = cantidad
+            ofertas_rest[i] -= cantidad
+            demandas_rest[j] -= cantidad
 
-        for i, j, _ in celdas:
-            if ofertas_restantes[i] > 0 and demandas_restantes[j] > 0:
-                cantidad = min(ofertas_restantes[i], demandas_restantes[j])
-                asignaciones[i][j] = cantidad
-                ofertas_restantes[i] -= cantidad
-                demandas_restantes[j] -= cantidad
+            if ofertas_rest[i] == 0 and demandas_rest[j] == 0:
+                i += 1
+                j += 1
+            elif ofertas_rest[i] == 0:
+                i += 1
+            elif demandas_rest[j] == 0:
+                j += 1
 
         return asignaciones
 
-    # ================================
+    # =======================
     # RESULTADOS
-    # ================================
+    # =======================
     def mostrar_resultados(self, asignaciones):
         for widget in self.resultados_frame.winfo_children():
             widget.destroy()
@@ -226,9 +232,6 @@ class MetodoCostoMinimoApp(ctk.CTk):
                     fila_txt += f"D{j+1} → {asignaciones[i][j]:.0f}  |  "
             ctk.CTkLabel(self.resultados_frame, text=fila_txt).pack(pady=3)
 
-    # ================================
-    # LIMPIAR
-    # ================================
     def limpiar(self):
         self.entry_origenes.delete(0, "end")
         self.entry_destinos.delete(0, "end")
@@ -238,5 +241,5 @@ class MetodoCostoMinimoApp(ctk.CTk):
 
 
 if __name__ == "__main__":
-    app = MetodoCostoMinimoApp()
+    app = MetodoEsquinaNoroesteApp()
     app.mainloop()
