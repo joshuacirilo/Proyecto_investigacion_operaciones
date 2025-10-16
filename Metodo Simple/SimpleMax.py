@@ -1,153 +1,146 @@
-# simplex_tableau.py
-# Implementación simple del método Simplex (tableau).
-# Soporta problemas con restricciones Ax <= b, x >= 0.
-# NOTA: No implementa fase I/II ni variables artificiales.
+import re
+from typing import List, Tuple
 
-from typing import Tuple, List
-import copy
+# -------------------- Funciones de utilidades --------------------
+
+def parse_ecuacion_z(ecuacion: str) -> List[float]:
+    """
+    Convierte una ecuación tipo: z = 5x^1 + 2x^2 + 8x^3
+    en una lista de coeficientes: [5, 2, 8]
+    """
+    ecuacion = ecuacion.replace(" ", "")
+    coef_pattern = r"([+-]?\d*\.?\d*)x\^(\d+)"
+    coeficientes = {}
+    for coef, var in re.findall(coef_pattern, ecuacion):
+        c = float(coef) if coef not in ["", "+", "-"] else (1.0 if coef != "-" else -1.0)
+        i = int(var)
+        coeficientes[i] = c
+    max_var = max(coeficientes.keys())
+    return [coeficientes.get(i, 0.0) for i in range(1, max_var + 1)]
+
+def parse_restriccion(restr: str, n_vars: int) -> Tuple[List[float], float]:
+    """
+    Convierte una restricción tipo: 2x^1 + 2x^2 + 2x^3 <= 65
+    en ([2, 2, 2], 65)
+    """
+    restr = restr.replace(" ", "")
+    coef_pattern = r"([+-]?\d*\.?\d*)x\^(\d+)"
+    coeficientes = {}
+    for coef, var in re.findall(coef_pattern, restr):
+        c = float(coef) if coef not in ["", "+", "-"] else (1.0 if coef != "-" else -1.0)
+        i = int(var)
+        coeficientes[i] = c
+    b = float(re.findall(r"(<=|=|>=)(-?\d+\.?\d*)", restr)[0][1])
+    return [coeficientes.get(i, 0.0) for i in range(1, n_vars + 1)], b
+
+# -------------------- Funciones del método Simplex --------------------
 
 def build_tableau(A: List[List[float]], b: List[float], c: List[float]) -> List[List[float]]:
-    """
-    Construye el tableau inicial para un problema de maximización:
-    Max z = c^T x  s.t.  A x <= b, x >= 0
-    Tableau tiene la forma:
-    [ A | I | b ]
-    [ -c^T | 0..0 | 0 ]  (fila Z)
-    """
-    m = len(A)      # restricciones
-    n = len(A[0])   # variables originales
-
-    # tabla: m filas de restricciones + 1 fila de Z
-    # columnas: n (x) + m (holgura) + 1 (b)
-    tableau = [[0.0] * (n + m + 1) for _ in range(m + 1)]
-
-    # llenar A y columnas de holgura (I)
-    for i in range(m):
-        for j in range(n):
-            tableau[i][j] = float(A[i][j])
-        tableau[i][n + i] = 1.0  # variable de holgura
-        tableau[i][-1] = float(b[i])
-
-    # fila Z (costes): -c en la parte de variables, holguras 0, b=0
-    for j in range(n):
-        tableau[-1][j] = -float(c[j])  # para maximizar
-    # tableau[-1][-1] ya es 0
-    return tableau
-
-def pivot(tableau: List[List[float]], row: int, col: int):
-    """Realiza pivot (Gauss-Jordan) en tableau sobre posición (row, col)."""
-    m = len(tableau)
-    n = len(tableau[0])
-    pivot_val = tableau[row][col]
-    if abs(pivot_val) < 1e-12:
-        raise ValueError("Pivot ≈ 0, no se puede pivotear.")
-
-    # dividir fila pivot por pivot_val
-    tableau[row] = [v / pivot_val for v in tableau[row]]
-
-    # anular columna en otras filas
-    for i in range(m):
-        if i == row:
-            continue
-        factor = tableau[i][col]
-        if abs(factor) > 0:
-            tableau[i] = [ tableau[i][j] - factor * tableau[row][j] for j in range(n) ]
-
-def find_entering_variable(tableau: List[List[float]], maximize: bool = True) -> int:
-    """
-    Determina columna pivote (variable de entrada) según condición de optimalidad.
-    Para maximizar: elegir la columna con coeficiente más negativo en fila Z.
-    Para minimizar: elegir la columna con coeficiente más positivo en fila Z.
-    Retorna índice de columna, o -1 si ya óptimo.
-    """
-    z_row = tableau[-1]
-    # excluir la columna de b (última)
-    coeffs = z_row[:-1]
-    if maximize:
-        # buscar coef < 0 (más negativo)
-        min_val = min(coeffs)
-        if min_val >= -1e-12:
-            return -1
-        return coeffs.index(min_val)
-    else:
-        # minimización: buscar coef > 0 (más positivo)
-        max_val = max(coeffs)
-        if max_val <= 1e-12:
-            return -1
-        return coeffs.index(max_val)
-
-def find_leaving_row(tableau: List[List[float]], entering_col: int) -> int:
-    """
-    Regla del mínimo cociente (condición de factibilidad).
-    Retorna la fila pivote (índice), o -1 si ilimitado.
-    """
-    m = len(tableau) - 1  # sin contar fila Z
-    ratios = []
-    for i in range(m):
-        a_ij = tableau[i][entering_col]
-        b_i = tableau[i][-1]
-        if a_ij > 1e-12:
-            ratios.append((b_i / a_ij, i))
-    if not ratios:
-        return -1  # ilimitado
-    # tomar el mínimo ratio
-    return min(ratios, key=lambda x: (x[0], x[1]))[1]
-
-def simplex(A: List[List[float]], b: List[float], c: List[float], maximize: bool = True, max_iters: int = 1000) -> Tuple[float, List[float], List[List[float]]]:
-    """
-    Ejecuta Simplex sobre Ax <= b, x >= 0.
-    Si maximize==False, hace minimización (usa criterio de entrada invertido).
-    Retorna (valor_optimo, vector_x, tableau_final).
-    NOTA: asume problema en forma que no requiere variables artificiales.
-    """
-    tableau = build_tableau(A, b, c if maximize else [-ci for ci in c])
     m = len(A)
     n = len(A[0])
+    tableau = [[0.0] * (n + m + 1) for _ in range(m + 1)]
 
-    # base inicial: las variables de holgura (índices n..n+m-1)
-    basis = [n + i for i in range(m)]
+    for i in range(m):
+        for j in range(n):
+            tableau[i][j] = A[i][j]
+        tableau[i][n + i] = 1.0
+        tableau[i][-1] = b[i]
 
-    it = 0
-    while it < max_iters:
-        it += 1
-        col = find_entering_variable(tableau, maximize=maximize)
-        if col == -1:
-            # óptimo
+    for j in range(n):
+        tableau[-1][j] = -c[j]
+    return tableau
+
+def mostrar_tabla(tableau: List[List[float]], encabezados: List[str], variables_basicas: List[str]):
+    col_width = 10
+    print("".join(h.center(col_width) for h in encabezados))
+    for vb, fila in zip(variables_basicas + ["Z"], tableau):
+        print(f"{vb.center(10)}" + "".join(f"{v:10.2f}" for v in fila))
+    print("-" * (len(encabezados) * col_width))
+
+def pivot(tableau: List[List[float]], row: int, col: int, encabezados: List[str]):
+    pivot_val = tableau[row][col]
+    print(f"\n🔸 Normalizando fila {row+1} dividiendo entre el pivote ({pivot_val:.4f})")
+    tableau[row] = [v / pivot_val for v in tableau[row]]
+
+    for i in range(len(tableau)):
+        if i != row:
+            factor = tableau[i][col]
+            if abs(factor) > 1e-9:
+                print(f"   F{i+1} = F{i+1} - ({factor:.4f}) * F{row+1}")
+            tableau[i] = [tableau[i][j] - factor * tableau[row][j] for j in range(len(tableau[0]))]
+
+def simplex(A: List[List[float]], b: List[float], c: List[float], encabezados: List[str]):
+    tableau = build_tableau(A, b, c)
+    m = len(A)
+    n = len(A[0])
+    basis = [n + i for i in range(m)]  # índices de las variables básicas (holguras)
+    variables_basicas = [f"x{n+i+1}" for i in range(m)]
+
+    iteracion = 0
+    while True:
+        iteracion += 1
+        print(f"\n============================")
+        print(f"🔹 Iteración {iteracion}")
+        print("============================")
+        mostrar_tabla(tableau, encabezados, variables_basicas)
+
+        z_row = tableau[-1][:-1]
+        if all(v >= -1e-9 for v in z_row):
+            print("✅ Solución óptima encontrada.")
             break
-        row = find_leaving_row(tableau, col)
-        if row == -1:
-            raise ValueError("Problema ilimitado (no existe fila de salida).")
-        # pivot y actualizar base
-        pivot(tableau, row, col)
-        basis[row] = col
+
+        col = z_row.index(min(z_row))
+        col_name = encabezados[col + 2]  # +2 por VB y Z
+        ratios = []
+        for i in range(m):
+            if tableau[i][col] > 1e-9:
+                ratios.append((tableau[i][-1] / tableau[i][col], i))
+        if not ratios:
+            raise ValueError("Problema ilimitado.")
+        row = min(ratios)[1]
+
+        pivot_val = tableau[row][col]
+        row_name = variables_basicas[row]
+        print(f"\n👉 Pivote = {pivot_val:.4f} (Fila {row+1}, Columna {col_name})")
+        print(f"🔁 Variable básica que sale: {row_name}")
+        print(f"🔁 Variable que entra: {col_name}\n")
+
+        pivot(tableau, row, col, encabezados)
+        variables_basicas[row] = col_name
 
     # leer solución
     x = [0.0] * n
-    for i, bv in enumerate(basis):
-        if bv < n:
-            x[bv] = tableau[i][-1]
-    # valor óptimo Z: fila Z, columna b
+    for i, vb in enumerate(variables_basicas):
+        if vb.startswith("x"):
+            idx = int(vb[1:]) - 1
+            if idx < n:
+                x[idx] = tableau[i][-1]
     z = tableau[-1][-1]
-    # si hicimos minimización invirtiendo c, ajustar signo
-    if not maximize:
-        z = -z
+
+    print("\n📊 Resultado final:")
+    mostrar_tabla(tableau, encabezados, variables_basicas)
+    print(f"Valor óptimo Z = {z:.2f}")
+    for i, val in enumerate(x, start=1):
+        print(f"x{i} = {val:.2f}")
+
     return z, x, tableau
 
-# ---------- Ejemplo de uso ----------
-if __name__ == "__main__":
-    # Max z = 3x1 + 5x2
-    # s.a.
-    #  1x1 + 0x2 <= 4
-    #  0x1 + 2x2 <= 12
-    #  3x1 + 2x2 <= 18
-    A = [
-        [1, 0],
-        [0, 2],
-        [3, 2],
-    ]
-    b = [4, 12, 18]
-    c = [3, 5]
+# -------------------- Ejecución interactiva --------------------
 
-    z, x, tab = simplex(A, b, c, maximize=True)
-    print("Z óptimo:", z)
-    print("x:", x)
+if __name__ == "__main__":
+    print("=== MÉTODO SIMPLEX (MAXIMIZACIÓN) ===")
+    ecuacion_z = input("Ingrese la ecuación de Z (ej. z=5x^1+2x^2+8x^3): ")
+    c = parse_ecuacion_z(ecuacion_z)
+    n_vars = len(c)
+    m = int(input("¿Cuántas restricciones tiene?: "))
+
+    A, b = [], []
+    for i in range(m):
+        restr = input(f"Ingrese restricción {i+1} (ej. 2x^1+2x^2+2x^3<=65): ")
+        a_i, b_i = parse_restriccion(restr, n_vars)
+        A.append(a_i)
+        b.append(b_i)
+
+    encabezados = ["VB", "Z"] + [f"x{i}" for i in range(1, n_vars + m + 1)] + ["b"]
+
+    simplex(A, b, c, encabezados)
